@@ -1,0 +1,5 @@
+streamlit==1.32.0
+sqlalchemy==2.0.35
+pyodbc==5.1.0
+langchain==0.3.0 
+openai==1.46.1
