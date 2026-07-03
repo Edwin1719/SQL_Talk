@@ -1,0 +1,38 @@
+# Core Framework
+streamlit==1.32.0
+python-dotenv==1.0.1
+
+# Database Connectivity
+sqlalchemy==2.0.35
+pyodbc==5.1.0
+psycopg2-binary==2.9.9
+pymysql==1.1.0
+
+# AI and Language Models
+openai==1.46.1
+langchain==0.3.0
+langchain-community==0.3.27
+langchain-openai==0.1.25
+
+# Data Processing and Analysis
+pandas==2.2.0
+numpy==1.26.0
+
+# Visualization
+plotly==5.17.0
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# UI Enhancements
+st-social-media-links==0.1.0
+
+# Utilities
+typing-extensions==4.12.0
+pydantic==2.7.0
+requests==2.32.0
+
+# Development (optional, uncomment for development)
+# pytest==8.2.0
+# black==24.4.0
+# flake8==7.0.0
+# mypy==1.10.0
