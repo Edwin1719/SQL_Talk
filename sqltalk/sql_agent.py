@@ -185,7 +185,7 @@ Pregunta: {question}
 """
 }
 
-def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> Union[pd.DataFrame, str]:
+def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> tuple:
     """
     Ejecuta una consulta SQL usando lenguaje natural
 
@@ -196,8 +196,9 @@ def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> 
         db_type: Tipo de base de datos para seleccionar el prompt apropiado
 
     Returns:
-        DataFrame con los resultados si es una consulta SELECT,
-        o string con la respuesta del LLM en otros casos
+        Tupla (resultado, sql_generado):
+        - resultado: DataFrame si es SELECT, string con error/texto en otros casos
+        - sql_generado: string con el SQL generado por el LLM (para mostrar en UI)
     """
     formato = PROMPT_TEMPLATES.get(db_type, PROMPT_TEMPLATES["SQL Server"])
     consulta_formateada = formato.format(question=input_usuario)
@@ -209,8 +210,8 @@ def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> 
     if "select" in cleaned_sql.strip().lower():
         try:
             df = pd.read_sql_query(cleaned_sql, engine)
-            return df
+            return df, cleaned_sql
         except Exception as e:
-            return f"Error ejecutando consulta: {e}\nSQL generado: {cleaned_sql}"
+            return f"Error ejecutando consulta: {e}", cleaned_sql
 
-    return cleaned_sql
+    return cleaned_sql, cleaned_sql

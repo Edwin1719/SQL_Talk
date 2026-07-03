@@ -25,7 +25,8 @@ if os.getenv("OPENAI_API_KEY"):
 
 # Session state
 for key, default in [('query_results', None), ('query_dataframe', None), ('last_query', ""),
-                     ('ai_assistant', None), ('ai_insights', None), ('follow_up_queries', [])]:
+                     ('last_sql', ""), ('ai_assistant', None), ('ai_insights', None),
+                     ('follow_up_queries', []), ('engine', None)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -63,6 +64,29 @@ with st.sidebar:
         conn_args['database'] = st.text_input("Base de datos")
     elif db_type == "SQLite":
         conn_args['database_path'] = st.text_input("Ruta al archivo .db", placeholder="C:/datos/mibd.db")
+
+    # Explorador de esquema
+    if st.session_state.engine is not None:
+        st.markdown("---")
+        st.markdown("##### :material/schema: Esquema de BD")
+        if st.button(":material/refresh: Explorar tablas", use_container_width=True):
+            try:
+                inspector = __import__("sqlalchemy").inspect(st.session_state.engine)
+                table_names = inspector.get_table_names()
+                if table_names:
+                    for table in table_names:
+                        cols = inspector.get_columns(table)
+                        col_list = ", ".join([f"{c['name']} ({str(c['type'])})" for c in cols[:5]])
+                        if len(cols) > 5:
+                            col_list += ", ..."
+                        st.markdown(f"**{table}**")
+                        st.caption(col_list)
+                else:
+                    st.caption("No se encontraron tablas")
+            except Exception as e:
+                st.caption(f"Error: {e}")
+    else:
+        st.caption("Conecta a una BD para ver su esquema")
 
     # Estado del asistente IA en sidebar
     st.markdown("---")
@@ -145,10 +169,12 @@ if consultar_btn and input_usuario:
                     chain, engine = get_db_chain(db_type, conn_args_filtered if conn_args_filtered else None)
                 else:
                     chain, engine = get_db_chain(db_type, conn_args)
-                respuesta = consulta(chain, engine, input_usuario, db_type)
+                st.session_state.engine = engine
+                respuesta, sql_generado = consulta(chain, engine, input_usuario, db_type)
 
             st.session_state.query_results = respuesta
             st.session_state.last_query = input_usuario
+            st.session_state.last_sql = sql_generado
 
             if isinstance(respuesta, pd.DataFrame):
                 st.session_state.query_dataframe = respuesta
@@ -180,8 +206,41 @@ if st.session_state.query_results is not None:
     st.space("small")
     st.markdown(f"##### :material/search_insights: {st.session_state.last_query}")
 
+    # SQL generado (colapsado)
+    if st.session_state.last_sql:
+        with st.expander(":material/code: Ver SQL generado", expanded=False):
+            st.code(st.session_state.last_sql, language="sql")
+
     if isinstance(st.session_state.query_results, pd.DataFrame):
         st.dataframe(st.session_state.query_results, use_container_width=True)
+
+        # Exportar resultados
+        df_exp = st.session_state.query_results
+        csv_data = df_exp.to_csv(index=False).encode("utf-8")
+        col_csv, col_xlsx = st.columns(2)
+        with col_csv:
+            st.download_button(
+                ":material/download: Exportar CSV",
+                data=csv_data,
+                file_name="sqltalk_resultados.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_xlsx:
+            try:
+                import io
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    df_exp.to_excel(writer, index=False, sheet_name="Resultados")
+                st.download_button(
+                    ":material/table: Exportar Excel",
+                    data=buf.getvalue(),
+                    file_name="sqltalk_resultados.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            except Exception:
+                st.caption("Excel no disponible (instala openpyxl: pip install openpyxl)")
     else:
         st.markdown(st.session_state.query_results)
         if st.session_state.query_dataframe is not None:
