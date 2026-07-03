@@ -16,6 +16,7 @@ from typing import Dict, List, Any, Optional
 from sqltalk.sql_agent import get_db_chain, consulta
 from sqltalk.viz import auto_visualize, show_data_summary, parse_text_to_dataframe
 from sqltalk.assistant import IntelligentAssistant
+from sqltalk.pbip_builder import generate_model, build_pbip_package, build_schema_text
 from dotenv import load_dotenv
 
 # Configuración inicial
@@ -26,7 +27,9 @@ if os.getenv("OPENAI_API_KEY"):
 # Session state
 for key, default in [('query_results', None), ('query_dataframe', None), ('last_query', ""),
                      ('last_sql', ""), ('ai_assistant', None), ('ai_insights', None),
-                     ('follow_up_queries', []), ('engine', None)]:
+                     ('follow_up_queries', []), ('engine', None),
+                     ('conversation_history', []), ('show_kpi', True),
+                     ('refined_query', False), ('is_refinement', False)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -85,10 +88,46 @@ with st.sidebar:
                     st.caption("No se encontraron tablas")
             except Exception as e:
                 st.caption(f"Error: {e}")
+
+        # Schema Q&A — preguntar sobre la estructura
+        st.markdown("##### :material/quiz: Preguntar sobre el esquema")
+        schema_question = st.text_input(
+            "Ej: ¿Qué tablas tienen información de clientes?",
+            placeholder="Ej: ¿Qué tablas tienen información de ventas?",
+            label_visibility="collapsed",
+            key="schema_question"
+        )
+        if st.button(":material/search: Consultar esquema", use_container_width=True, key="btn_schema"):
+            if schema_question.strip():
+                try:
+                    with st.spinner("Analizando esquema..."):
+                        inspector = __import__("sqlalchemy").inspect(st.session_state.engine)
+                        table_names = inspector.get_table_names()
+                        schema_parts = []
+                        for table in table_names:
+                            cols = inspector.get_columns(table)
+                            col_info = ", ".join([f"{c['name']} ({c['type']})" for c in cols])
+                            # Foreign keys
+                            fks = inspector.get_foreign_keys(table)
+                            fk_info = ""
+                            if fks:
+                                fk_strs = [f"{fk['constrained_columns']} → {fk['referred_table']}.{fk['referred_columns']}" for fk in fks]
+                                fk_info = f" | FK: {'; '.join(fk_strs)}"
+                            schema_parts.append(f"Tabla: {table}\nColumnas: {col_info}{fk_info}")
+                        schema_text = "\n\n".join(schema_parts)
+                        response = st.session_state.ai_assistant.query_schema(schema_text, schema_question)
+                        st.session_state.schema_answer = response
+                except Exception as e:
+                    st.session_state.schema_answer = f"Error: {e}"
+            else:
+                st.warning("Escribí una pregunta sobre el esquema")
+
+        if st.session_state.get('schema_answer'):
+            with st.container():
+                st.markdown("**Respuesta:**")
+                st.markdown(st.session_state.schema_answer)
     else:
         st.caption("Conecta a una BD para ver su esquema")
-
-    # Estado del asistente IA en sidebar
     st.markdown("---")
     st.markdown("##### :material/smart_toy: Asistente IA")
     if st.session_state.ai_assistant and hasattr(st.session_state.ai_assistant, 'session_history'):
@@ -142,12 +181,14 @@ with st.container(horizontal=True, horizontal_alignment="distribute"):
 with st.container(horizontal=True, horizontal_alignment="left"):
     mostrar_graficos = st.checkbox("Mostrar gráficos", value=True)
     activar_ia = st.checkbox("Asistente IA", value=True, help="Activa análisis inteligente con insights automáticos")
+    mostrar_kpi = st.checkbox("Panel KPIs", value=True, help="Muestra métricas clave del resultado")
 
     if st.button(":material/delete: Limpiar", type="secondary"):
         for key in ['query_results', 'query_dataframe', 'last_query', 'ai_insights', 'follow_up_queries']:
             st.session_state[key] = None if key != 'last_query' else "" if key == 'last_query' else []
+        st.session_state.conversation_history = []
+        st.session_state.is_refinement = False
         st.rerun()
-
 # Procesamiento de consulta
 if consultar_btn and input_usuario:
     # Validar que los campos necesarios no estén vacíos
@@ -170,7 +211,22 @@ if consultar_btn and input_usuario:
                 else:
                     chain, engine = get_db_chain(db_type, conn_args)
                 st.session_state.engine = engine
-                respuesta, sql_generado = consulta(chain, engine, input_usuario, db_type)
+
+                # Refinamiento iterativo: inyectar contexto de consulta anterior
+                query_to_run = input_usuario
+                st.session_state.is_refinement = False
+                if (st.session_state.conversation_history
+                    and len(input_usuario.split()) < 15
+                    and not input_usuario.upper().startswith(("SELECT", "WITH"))):
+                    last = st.session_state.conversation_history[-1]
+                    query_to_run = (
+                        f"[Contexto: consulta anterior: '{last['query']}' → "
+                        f"SQL: {last['sql']}] "
+                        f"{input_usuario}"
+                    )
+                    st.session_state.is_refinement = True
+
+                respuesta, sql_generado = consulta(chain, engine, query_to_run, db_type)
 
             st.session_state.query_results = respuesta
             st.session_state.last_query = input_usuario
@@ -183,6 +239,14 @@ if consultar_btn and input_usuario:
                 if df_parsed is not None:
                     st.session_state.query_dataframe = df_parsed
 
+            # Guardar en historial conversacional
+            if st.session_state.query_dataframe is not None:
+                st.session_state.conversation_history.append({
+                    'query': input_usuario,
+                    'sql': sql_generado,
+                    'rows': len(st.session_state.query_dataframe),
+                    'cols': list(st.session_state.query_dataframe.columns[:5])
+                })
             # Análisis inteligente con IA
             if activar_ia and st.session_state.query_dataframe is not None:
                 with st.spinner("🤖 Analizando datos con IA..."):
@@ -201,15 +265,47 @@ if consultar_btn and input_usuario:
     else:
         st.warning(f"Por favor, completa los siguientes campos para {db_type}: {', '.join(missing_fields)}")
 
-# Mostrar resultados
+# =====================================================
+# RESULTADOS
+# =====================================================
 if st.session_state.query_results is not None:
     st.space("small")
     st.markdown(f"##### :material/search_insights: {st.session_state.last_query}")
+
+    # Indicador de refinamiento contextual
+    if st.session_state.is_refinement:
+        st.caption("🔗 Usando contexto de la consulta anterior — podés seguir refinando")
 
     # SQL generado (colapsado)
     if st.session_state.last_sql:
         with st.expander(":material/code: Ver SQL generado", expanded=False):
             st.code(st.session_state.last_sql, language="sql")
+
+    # =====================================================
+    # PANEL DE KPIS (primeras columnas numéricas)
+    # =====================================================
+    if (mostrar_kpi
+        and st.session_state.query_dataframe is not None
+        and len(st.session_state.query_dataframe) > 0):
+        df = st.session_state.query_dataframe
+        kpi_cols = df.select_dtypes(include=['number']).columns[:6].tolist()
+        if kpi_cols:
+            st.markdown("##### :material/metrics: KPIs Rápidos")
+            cols = st.columns(len(kpi_cols))
+            first = df.iloc[0]
+            for i, col in enumerate(kpi_cols):
+                with cols[i]:
+                    val = first[col]
+                    if isinstance(val, (int, float)):
+                        if abs(val) >= 1_000_000:
+                            display = f"${val/1_000_000:,.2f}M" if "monto" in col.lower() or "venta" in col.lower() or "precio" in col.lower() else f"{val/1_000_000:,.2f}M"
+                        elif abs(val) >= 1_000:
+                            display = f"${val/1_000:,.1f}K" if "monto" in col.lower() or "venta" in col.lower() or "precio" in col.lower() else f"{val/1_000:,.1f}K"
+                        else:
+                            display = f"${val:,.0f}" if "monto" in col.lower() or "venta" in col.lower() or "precio" in col.lower() else f"{val:,.0f}"
+                    else:
+                        display = str(val)
+                    st.metric(label=col.replace("_", " ").title(), value=display)
 
     if isinstance(st.session_state.query_results, pd.DataFrame):
         st.dataframe(st.session_state.query_results, use_container_width=True)
@@ -365,6 +461,59 @@ if st.session_state.ai_insights is not None and st.session_state.ai_insights.str
             st.session_state.suggested_query_to_run = selected_query
             st.info(f"💡 Consulta seleccionada: {selected_query}")
             st.info("👆 Cópiala en el campo de arriba y presiona Consultar")
+
+
+# =====================================================
+# GENERADOR DE MODELO POWER BI (PBIP)
+# =====================================================
+with st.expander(":material/table_chart: Generar modelo Power BI", expanded=False):
+    if st.session_state.engine is None:
+        st.info(":material/info: Conectá a una base de datos primero")
+    else:
+        st.markdown("Describí qué querés incluir en el modelo semántico:")
+        pbip_request = st.text_area(
+            "Solicitud",
+            placeholder="Ej: Crea una tabla calendario 2020-2026 con medidas de ventas YTD, PY y YoY%. Agrega relaciones entre tablas.",
+            label_visibility="collapsed",
+            key="pbip_request"
+        )
+
+        col_btn, col_status = st.columns([2, 3])
+        with col_btn:
+            generar_modelo_btn = st.button(
+                ":material/auto_fix: Generar modelo",
+                use_container_width=True,
+                disabled=not pbip_request
+            )
+
+        if generar_modelo_btn:
+            if pbip_request.strip():
+                with st.spinner("🧠 Generando modelo semántico con IA..."):
+                    try:
+                        inspector = __import__("sqlalchemy").inspect(st.session_state.engine)
+                        schema_text = build_schema_text(inspector)
+                        llm = st.session_state.ai_assistant.llm
+                        model_json = generate_model(schema_text, pbip_request, llm)
+                        if model_json:
+                            st.session_state.pbip_model = model_json
+                            st.success("✅ Modelo generado correctamente")
+                        else:
+                            st.error("❌ El modelo generado no es válido. Reformulá la solicitud.")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            else:
+                st.warning("Escribí qué querés incluir en el modelo")
+
+        if st.session_state.get("pbip_model"):
+            zip_buf = build_pbip_package(st.session_state.pbip_model)
+            st.download_button(
+                ":material/download: Descargar proyecto Power BI (.pbip)",
+                data=zip_buf,
+                file_name="sqltalk_modelo.pbip.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+            st.caption(":material/info: Descomprimí la carpeta y abrila con Power BI Desktop")
 
 # Footer
 st.markdown("---")

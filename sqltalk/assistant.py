@@ -324,3 +324,31 @@ class IntelligentAssistant:
             'follow_up_queries': follow_up_queries,
             'session_context': len(self.session_history)
         }
+
+    def query_schema(self, schema_text: str, question: str) -> str:
+        """Responde preguntas sobre el esquema de la base de datos usando el LLM"""
+        system_prompt = """Eres un experto en bases de datos relacionales. Tu trabajo es analizar
+el esquema de una base de datos y responder preguntas del usuario de forma clara y concisa.
+
+Debes:
+- Identificar qué tablas y columnas son relevantes para la pregunta
+- Explicar relaciones entre tablas si aplica
+- Sugerir cómo usar esa información para consultas
+- Usar un lenguaje claro, el usuario no es técnico
+
+Ejemplo:
+Usuario: "¿Qué tablas tienen información de clientes?"
+Respuesta: "La tabla 'Clientes' tiene los datos principales (nombre, dirección, teléfono).
+También hay una tabla 'Ventas' que se relaciona con Clientes por el campo 'cliente_id'.
+Si necesitas consultar clientes, podés usar la tabla Clientes. Si querés ver qué compraron,
+podés combinar Clientes con Ventas." """
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Esquema de la base de datos:\n{schema_text}\n\nPregunta: {question}")
+            ]
+            response = self.llm(messages)
+            return response.content
+        except Exception as e:
+            return f"Error consultando el esquema: {str(e)}"

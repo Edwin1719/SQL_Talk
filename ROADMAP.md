@@ -19,9 +19,8 @@
 
 ---
 
-## Fase 1 — Consolidación (actual)
 
-La base actual del proyecto.
+## Fase 1 — Consolidación
 
 | Feature | Estado | Descripción |
 |---|---|---|
@@ -29,24 +28,27 @@ La base actual del proyecto.
 | Multi-BD (SQL Server, PostgreSQL, MySQL, SQLite) | ✅ | 4 motores via SQLAlchemy |
 | Visualización automática | ✅ | Plotly con detección de tipo de gráfico |
 | Insights IA | ✅ | Análisis de contexto + tendencias + anomalías |
+| Refinamiento iterativo de consultas | ✅ | Contexto conversacional entre consultas |
+| Panel de KPIs rápidos | ✅ | `st.metric()` con primeras columnas numéricas |
+| Explorador de esquema inteligente | ✅ | Preguntas NL sobre estructura de BD vía LLM |
+| Generación de modelo Power BI (PBIP) | ✅ | DeepSeek genera JSON TOM → ZIP .pbip descargable |
 | SQL generado visible en UI | ✅ | Expander colapsado con `st.code` |
 | Exportar CSV / Excel | ✅ | Botones de descarga directa |
 | Explorador de esquema | ✅ | `sqlalchemy.inspect()` en sidebar |
-| Test suite (54 tests) | ✅ | pytest sobre core lógico |
+| Test suite (34 tests) | ✅ | pytest sobre pbip_builder, viz, assistant, sql_agent |
 | UI profesional con sidebar | ✅ | Material icons, gradiente, footer SVGs |
-
 ---
 
 ## Fase 2 — Integración con Power BI (próximo)
 
-### 🎯 2.1 — Misma BD como puente
+### 📌 2.1 — Misma BD como puente
 
 SQLTalk y Power BI apuntan a la misma base de datos. Power BI en DirectQuery o Import.
 El gerente usa SQLTalk para explorar y validar, Power BI para dashboards formales.
 
 - **Esfuerzo:** 0 (solo configurar el origen de datos en Power BI Desktop)
-- **Valor:** Alto — el usuario ya puede hacerlo hoy
-- **Dependencias:** Ninguna
+- **Valor:** Alto
+- **Nota:** No es una tarea, es una decisión de configuración ya disponible hoy.
 
 ### 🎯 2.2 — Generación de medidas DAX
 
@@ -65,34 +67,57 @@ Ventas PY = CALCULATE( SUM(Ventas[Monto]), SAMEPERIODLASTYEAR('Calendario'[Fecha
 - **Valor:** Medio — educativo, acelera la creación de medidas
 - **Dependencias:** Prompt engineering para DAX
 
-### 🎯 2.3 — Publicación en modelo semántico vía MCP
+### ✅ 2.3 — Generación de modelo semántico PBIP ⭐
 
-Integración con **Power BI Modeling MCP** para que SQLTalk pueda crear tablas,
-medidas y relaciones directamente en un modelo semántico de Power BI Desktop o Fabric.
+SQLTalk genera un proyecto Power BI completo (formato PBIP) a partir del esquema
+de la BD conectada y las instrucciones del usuario. DeepSeek produce el JSON del modelo
+(tablas, medidas, relaciones) y la app lo empaqueta como archivo descargable.
 
 ```text
-Usuario: "Agrega una tabla calendario al modelo con medidas de ventas YTD y PY"
-SQLTalk → Power BI Modeling MCP → Modelo semántico actualizado
+Usuario: "Agrega una tabla calendario 2020-2026 con medidas de ventas YTD, PY y YoY%"
+SQLTalk → DeepSeek genera JSON del modelo → archivo .pbip → descarga → abrir en Power BI Desktop
 ```
 
-- **Esfuerzo:** Medio (servidor MCP + trigger desde SQLTalk)
-- **Valor:** Alto — construcción automatizada del modelo desde NL
-- **Dependencias:** Power BI Desktop abierto o Fabric workspace configurado
+**Lo que puede generar:**
+- Tabla calendario con año, mes, trimestre, días hábiles
+- Medidas DAX: YTD, PY, YoY%, promedios, rankings
+- Relaciones entre tablas detectadas del esquema
+- Métricas de negocio según el dominio (ventas, inventario, clientes)
 
-### 💡 2.4 — Generación de dashboard PBIR
+- **Esfuerzo:** Medio (~80 líneas: serialización PBIP + template de prompt)
+- **Valor:** Alto — el usuario obtiene un modelo funcional sin abrir Power BI
+- **Dependencias:** Ninguna (solo Python + DeepSeek)
 
-SQLTalk genera archivos de definición de página/visual Power BI (formato PBIR/PBIP)
-y los despliega en un workspace de Fabric.
+### 🔮 2.4 — Publicación en vivo vía MCP (futuro)
+
+Cuando 2.3 esté maduro y el usuario necesite aplicar los cambios directamente
+sin descargar archivos, se agrega un servidor MCP que escribe en el modelo vivo
+de Power BI Desktop (vía Tabular Editor CLI) o Fabric (vía XMLA Endpoint).
+
+```text
+Usuario: "Agrega la medida de ventas YTD al modelo"
+SQLTalk → MCP Power Modeling Server → Power BI Desktop / Fabric → modelo actualizado
+```
+
+- **Esfuerzo:** Medio (servidor MCP + conector a TE o XMLA)
+- **Valor:** Alto — feedback inmediato sobre el modelo vivo
+- **Dependencias:** Power BI Desktop abierto (TE) o Fabric workspace (XMLA)
+- **Requiere:** 2.3 implementado primero (el MCP server reusa la lógica de generación)
+
+### 🔮 2.5 — Generación de dashboard (futuro lejano)
+
+SQLTalk genera un reporte completo con páginas, visuales y filtros, ya sea como
+archivos descargables o publicado directo a Fabric.
 
 ```text
 Usuario: "Crea un dashboard de ventas por región con mapa y KPI de cumplimiento"
-SQLTalk → archivos PBIR → Fabric API → Dashboard publicado
+SQLTalk → JSON de definición de reporte → descarga PBIP o publish a Fabric
 ```
 
-- **Esfuerzo:** Alto (requiere conocimiento del formato PBIR + Fabric REST API)
+- **Esfuerzo:** Alto (requiere conocimiento del formato de visuales PBIP)
 - **Valor:** Máximo — dashboard completo desde una frase
-- **Dependencias:** Fabric workspace, permiso de despliegue
-
+- **Dependencias:** Fabric workspace para publish automático
+- **Requiere:** 2.3 y 2.4 implementados
 ---
 
 ## Fase 3 — Automatización del análisis (siguiente)
@@ -197,7 +222,6 @@ lidera con un 32% del total."
 
 ### 🔮 5.1 — App empaquetada (.exe)
 
-SQLTalk se empaqueta como ejecutable independiente con PyInstaller.
 El usuario descarga, hace doble clic y la app se abre en el navegador.
 
 - **Esfuerzo:** Bajo (script de PyInstaller + ícono)
@@ -220,7 +244,7 @@ entre turnos.
 
 ```
 FASE 1 ─── Consolidación ───────────────────────────────────────────── ✅ hoy
-FASE 2 ─── Power BI ─── BD puente → DAX → MCP Modelo → PBIR dashboard
+FASE 2 ─── Power BI ─── BD puente → DAX → Modelo PBIP ⭐ → MCP en vivo → Dashboard
 FASE 3 ─── Automatización ─── Reportes → Alertas → Historial → Favoritos
 FASE 4 ─── Análisis avanzado ─── JOIN auto → Multi-período → Debug SQL → Narración
 FASE 5 ─── UX ─── .exe → Chat conversacional
@@ -238,6 +262,5 @@ FASE 5 ─── UX ─── .exe → Chat conversacional
 - Las features marcadas como 🔮 son visión a futuro y pueden requerir
   cambios arquitectónicos más profundos.
 
----
-
 *Última actualización: Julio 2026*
+
