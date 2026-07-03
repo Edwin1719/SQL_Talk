@@ -140,10 +140,10 @@ tests/
 | Consultas sugeridas | ✅ | Basadas en dominio detectado (ventas, productos, clientes) |
 | Historial de sesión | ✅ | Últimas 10 consultas con resumen |
 | CLI | 🟡 | Consulta fija hardcodeada, no interactivo |
-| Tests | ❌ | No implementados |
-| Rate limiting / retry | ❌ | Sin manejo de errores de API |
-| Límite de filas en consultas | ❌ | Sin protección contra tablas grandes |
-| Validación de SQL generado | ❌ | No rechaza DROP/DELETE/TRUNCATE |
+| Tests | ✅ | 54 tests (pytest) — clean_sql_query, viz, assistant |
+| Rate limiting / retry | ➖ | No requerido (uso gerencial < 20 requests/sesión) |
+| Límite de filas en consultas | ⚙️ | Opt-in vía `MAX_QUERY_ROWS` en `.env` |
+| Validación de SQL generado | ❌ | Pendiente — no rechaza DROP/DELETE/TRUNCATE |
 
 ---
 
