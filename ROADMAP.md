@@ -72,6 +72,42 @@ guardián bloquee DROP/DELETE sin modificar datos en la BD.
 - **Tests:** 6 tests (3 pipeline correcto + 1 error SQL + 2 verificación de guardián contra BD real)
 ---
 
+### 🎯 1.8 — Autodetección de ODBC Driver
+
+`sql_agent.py` hardcodea `ODBC Driver 17 for SQL Server`. Detectar
+automáticamente el driver disponible desde el registro de Windows
+o probando conectividad con `pyodbc.drivers()`.
+
+- **Esfuerzo:** Muy bajo (~10 líneas)
+- **Valor:** Medio — elimina error de conexión en máquinas con Driver 18
+- **Dependencias:** `pyodbc`
+
+### 💡 1.9 — Logging estructurado
+
+Los warnings de SQLAlchemy (tipos no reconocidos: `hierarchyid`,
+`geography`) y errores de conexión se mezclan con stdout de Streamlit.
+Migrar a `logging` con archivo rotativo y nivel configurable.
+
+- **Esfuerzo:** Bajo (~20 líneas)
+- **Valor:** Medio — facilita debugging en producción
+
+### 💡 1.10 — Fix test_viz.py
+
+`test_viz.py` importa `detect_column_names` que fue eliminado de
+`viz.py`. Reparar o eliminar el archivo para suite completo en verde.
+
+- **Esfuerzo:** Muy bajo (~5 líneas)
+- **Valor:** Medio — elimina falso negativo en el suite
+
+### 💡 1.11 — Tests con mock del LLM para assistant.py
+
+`generate_insights()` y `suggest_follow_up_queries()` usan LLM real y
+no tienen tests unitarios. Mockear respuestas conocidas del asistente.
+
+- **Esfuerzo:** Bajo (~30 líneas: fixture + 4 tests)
+- **Valor:** Alto — detecta regresiones en generación de insights
+- **Dependencias:** `pytest`, `unittest.mock`
+
 ## Fase 2 — Integración con Power BI (próximo)
 
 ### 📌 2.1 — Misma BD como puente
@@ -295,21 +331,82 @@ para mejorar mantenibilidad y preparar el terreno para el chat conversacional (5
 - **Esfuerzo:** Medio (~2h: extraer lógica a archivos separados + pruebas manuales)
 - **Valor:** Alto — el código se vuelve testeable, navegable y preparado para 5.2
 - **Dependencias:** Ninguna
-- **Nota:** Hacerlo ANTES de 5.2 para no refactorizar dos veces
+
+### 💡 5.4 — Guía de usuario para no-técnicos
+
+Manual en PDF/HTML con screenshots: cómo obtener API key, conectar a BD,
+primeros pasos, solución de problemas comunes. Escrito para el perfil real
+del producto (gerentes, administrativos).
+
+- **Esfuerzo:** Medio (~2h: escribir + capturas)
+- **Valor:** Alto — reduce soporte técnico en distribución comercial
+
+### 🔮 5.5 — Soporte multi-idioma (inglés)
+
+Traducir prompts, insights y UI a inglés para mercado global.
+Configurable vía variable de entorno `APP_LANG=en`.
+
+- **Esfuerzo:** Medio (~1h: extraer strings a archivo de traducción)
+- **Valor:** Alto — abre mercado internacional
+
+---
+
+## Fase 6 — Seguridad y operaciones
+
+### 🎯 6.1 — Cifrado de API keys en disco
+
+El archivo `.env` contiene API keys en texto plano. Cifrar la sección
+de credenciales con una clave derivada de la sesión del usuario.
+
+- **Esfuerzo:** Bajo (~15 líneas: `cryptography.fernet` + helper)
+- **Valor:** Alto — requisito para distribución comercial
+- **Dependencias:** `cryptography`
+
+### 🎯 6.2 — Rate limiting
+
+Proteger la app contra consultas masivas accidentales o maliciosas.
+Límite por ventana de tiempo configurable desde `.env`.
+
+- **Esfuerzo:** Bajo (~15 líneas: decorador + `st.session_state` contador)
+- **Valor:** Alto — evita sobrecarga a la BD y consumo excesivo de API
+
+### 💡 6.3 — Autenticación básica de usuarios
+
+Pantalla de login con usuario/contraseña antes de acceder a la app.
+Configurable desde `.env` (desactivado por defecto para desarrollo).
+
+- **Esfuerzo:** Bajo (~20 líneas: formulario + validación)
+- **Valor:** Alto — requisito para entornos productivos
+
+### 🔮 6.4 — Auditoría de consultas
+
+Registro persistente de quién ejecutó cada consulta, timestamp, SQL
+generado y resultado (filas devueltas o error). Exportable a CSV.
+
+- **Esfuerzo:** Medio (~40 líneas: modelo de datos + UI de consulta)
+- **Valor:** Alto — trazabilidad para cumplimiento normativo
+
+### 🔮 6.5 — Multi-tenant
+
+Cada usuario con su propia configuración de BD, historial y favoritos.
+Aislamiento total entre inquilinos.
+
+- **Esfuerzo:** Alto (requiere 6.3 primero + refactor de estado)
+- **Valor:** Máximo — modelo SaaS con clientes independientes
+- **Requiere:** 6.3 implementado
 
 ---
 
 ## Resumen visual del roadmap
 
 ```
-FASE 1 ─── Consolidación ─── Guardián SQL → Housekeeping → Tests integración ✅ hoy + 🎯
+FASE 1 ─── Consolidación ─── Guardián SQL → Housekeeping → Tests integración → ODBC auto → Logging → Fix tests → Mock assistant
 FASE 2 ─── Power BI ─── BD puente → DAX → Modelo PBIP ⭐ → MCP en vivo → Dashboard
 FASE 3 ─── Automatización ─── Reportes → Alertas → Historial → Favoritos
 FASE 4 ─── Análisis avanzado ─── JOIN auto → Multi-período → Debug SQL → Narración → Parsing robusto
-FASE 5 ─── UX ─── .exe → Chat conversacional → Refactor UI
+FASE 5 ─── UX ─── .exe → Chat conversacional → Refactor UI → Guía usuario → Multi-idioma
+FASE 6 ─── Seguridad ─── Cifrado keys → Rate limit → Auth básica → Auditoría → Multi-tenant
 ```
-
----
 
 ## Notas
 
