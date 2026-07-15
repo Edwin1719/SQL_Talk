@@ -46,6 +46,67 @@ def clean_sql_query(sql_query: str) -> str:
 
     return sql_query
 
+def validate_sql_readonly(sql: str) -> tuple:
+    """
+    Valida que una consulta SQL sea exclusivamente de solo lectura (SELECT / WITH).
+    Rechaza DROP, DELETE, TRUNCATE, UPDATE, INSERT, ALTER, CREATE, EXEC, MERGE, etc.
+
+    Lee la config desde .env:
+      ENABLE_SQL_VALIDATION=true|false  (default: true)
+      FORBIDDEN_SQL_KEYWORDS=DROP,DELETE,... (default: el listado completo)
+
+    Returns:
+        (True, "") si es válida / validación desactivada.
+        (False, "mensaje de error") si contiene operaciones peligrosas.
+    """
+    # Validación desactivada explícitamente?
+    if os.getenv("ENABLE_SQL_VALIDATION", "true").strip().lower() not in ("1", "true", "yes"):
+        return True, ""
+
+    if not sql or not sql.strip():
+        return True, ""
+
+    # Normalizar: eliminar comentarios para que no enmascaren el primer token
+    cleaned = re.sub(r'--.*$', '', sql, flags=re.MULTILINE)
+    cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
+    cleaned = cleaned.strip()
+
+    if not cleaned:
+        return True, ""
+
+    # Primer token no-whitespace → palabra clave principal
+    first_token = cleaned.split(maxsplit=1)[0].upper() if cleaned.split() else ""
+
+    # SELECT directo → válido
+    if first_token == "SELECT":
+        return True, ""
+
+    # WITH (CTE) → válido solo si contiene un SELECT en el cuerpo
+    if first_token == "WITH":
+        if re.search(r'\bSELECT\b', cleaned, re.IGNORECASE):
+            return True, ""
+        return False, "CTE sin SELECT — la consulta no retorna datos."
+
+    # Palabras clave peligrosas (configurables desde .env)
+    default_forbidden = [
+        "DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE",
+        "EXEC", "EXECUTE", "MERGE", "REPLACE", "RENAME", "GRANT", "REVOKE", "CALL",
+    ]
+    env_kw = os.getenv("FORBIDDEN_SQL_KEYWORDS")
+    forbidden = [kw.strip().upper() for kw in env_kw.split(",")] if env_kw else default_forbidden
+
+    if first_token in forbidden:
+        return False, (
+            f"Operación no permitida: {first_token}. "
+            "Solo se permiten consultas SELECT de solo lectura."
+        )
+
+    # Token no reconocido → rechazar por seguridad
+    return False, (
+        f"Consulta no reconocida: '{first_token}'. "
+        "Solo se permiten consultas SELECT de solo lectura."
+    )
+
 def get_db_chain(db_type: str = "SQL Server", conn_args: Optional[Dict[str, str]] = None) -> Tuple[Any, Engine]:
     """
     Crea y devuelve una cadena de base de datos SQL y un motor de SQLAlchemy
@@ -207,6 +268,12 @@ def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> 
     sql_query = chain.invoke({"question": input_usuario})
 
     cleaned_sql = clean_sql_query(sql_query)
+
+    # --- GUARDIÁN SQL: validar solo lectura ---
+    valido, msg = validate_sql_readonly(cleaned_sql)
+    if not valido:
+        return msg, ""
+    # -----------------------------------------
 
     # Detectar respuesta JSON estructurada (LLM responde con datos en vez de SQL)
     try:

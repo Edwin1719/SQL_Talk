@@ -35,19 +35,20 @@
 | SQL generado visible en UI | ✅ | Expander colapsado con `st.code` |
 | Exportar CSV / Excel | ✅ | Botones de descarga directa |
 | Explorador de esquema | ✅ | `sqlalchemy.inspect()` en sidebar |
-| Test suite (34 tests) | ✅ | pytest sobre pbip_builder, viz, assistant, sql_agent |
+| Test suite | ✅ | 59 tests (pytest) — sql_agent, assistant, pbip_builder |
 | UI profesional con sidebar | ✅ | Material icons, gradiente, footer SVGs |
 
-### 🎯 1.5 — Guardián SQL (solo SELECT)
+### ✅ 1.5 — Guardián SQL (solo SELECT)
 
-SQLTalk valida que todo SQL generado sea exclusivamente una consulta `SELECT`,
-rechazando `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `INSERT` y cualquier
-statement destructivo antes de ejecutarlo contra la BD.
+SQLTalk rechaza cualquier consulta que no sea `SELECT` o `WITH ... SELECT`
+antes de ejecutarla contra la BD. Detecta DROP, DELETE, TRUNCATE, UPDATE,
+INSERT, ALTER, CREATE, EXEC, MERGE y tokens no reconocidos.
 
-- **Esfuerzo:** Bajo (~30 líneas en `sql_agent.py`: parser + test)
+- **Esfuerzo:** Bajo (~60 líneas: función + hook + 21 tests) — ✅ Completado
 - **Valor:** Crítico — previene pérdida o modificación accidental de datos productivos
-- **Dependencias:** Ninguna
-- **Configuración:** Variable `SQL_READONLY_MODE=true` en `.env` (opcional, por defecto activo)
+- **Configuración:** `ENABLE_SQL_VALIDATION=false` en `.env` para desactivar
+- **Personalización:** `FORBIDDEN_SQL_KEYWORDS=DROP,DELETE` en `.env`
+- **Tests:** 21 casos cubriendo SELECT, CTE, DROP, DELETE, comentarios enmascarados, validación desactivada
 
 ### ✅ 1.6 — Housekeeping: dependencias muertas
 
@@ -60,15 +61,15 @@ usa Plotly.
 - **Dependencias:** Ninguna
 - **Riesgo:** Bajo — verificar que ningún import los referencie antes de eliminar
 
-### 🎯 1.7 — Tests de integración del pipeline completo
+### ✅ 1.7 — Tests de integración del pipeline completo
 
-Agregar tests que validen el flujo NL → SQL → DataFrame usando una BD
-SQLite en memoria y un mock del LLM que devuelva SQL conocido. Hoy hay
-34 tests unitarios pero ninguno para `consulta()` ni `get_db_chain()`.
+Tests que validan el flujo NL → SQL → DataFrame usando SQLite en memoria
+y mock del LLM. Verifican SELECT, filtros, count, SQL inválido, y que el
+guardián bloquee DROP/DELETE sin modificar datos en la BD.
 
-- **Esfuerzo:** Bajo (~1h: fixture con `sqlite:///:memory:` + mock de `ChatOpenAI`)
+- **Esfuerzo:** Bajo (~45 líneas: fixture con `sqlite:///:memory:` + mock) — ✅ Completado
 - **Valor:** Alto — detecta regresiones en el core del proyecto antes de producción
-- **Dependencias:** `pytest`, `unittest.mock`
+- **Tests:** 6 tests (3 pipeline correcto + 1 error SQL + 2 verificación de guardián contra BD real)
 ---
 
 ## Fase 2 — Integración con Power BI (próximo)

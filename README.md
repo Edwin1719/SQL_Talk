@@ -135,8 +135,8 @@ tests/
 | Consultas sugeridas | ✅ | Basadas en dominio detectado (ventas, productos, clientes) |
 | Historial de sesión | ✅ | Últimas 10 consultas con resumen |
 | Exportar CSV / Excel | ✅ | Botones de descarga directa |
-| Test suite | ✅ | 44 tests (pytest) — pbip_builder, assistant, sql_agent |
-| Validación de SQL generado | ❌ | Pendiente — no rechaza DROP/DELETE/TRUNCATE |
+| Test suite | ✅ | 59 tests (pytest) — sql_agent, assistant, pbip_builder |
+| Validación de SQL generado | ✅ | Guardián SQL: rechaza DROP/DELETE/TRUNCATE/... vía validate_sql_readonly() |
 
 ## Dependencias principales
 
