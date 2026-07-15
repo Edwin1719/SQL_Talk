@@ -1,12 +1,14 @@
 import os
 import re
 from typing import Dict, Optional, Tuple, Union, Any
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine, Engine, inspect
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
 from langchain.chains import create_sql_query_chain
+from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 import pandas as pd
+import json
 
 load_dotenv()
 
@@ -55,7 +57,7 @@ def get_db_chain(db_type: str = "SQL Server", conn_args: Optional[Dict[str, str]
         conn_args: Diccionario con parámetros de conexión específicos por motor
 
     Returns:
-        Tupla con (SQLDatabaseChain, Engine) configurados y listos para usar
+        Tupla con (Runnable (create_sql_query_chain), Engine) configurados y listos para usar
 
     Raises:
         ValueError: Si el tipo de BD no es soportado o faltan parámetros requeridos
@@ -106,84 +108,84 @@ def get_db_chain(db_type: str = "SQL Server", conn_args: Optional[Dict[str, str]
         raise ValueError(f"Tipo de base de datos no soportado: {db_type}")
 
     engine = create_engine(connection_string)
-    db = SQLDatabase(engine)
 
-    # Configuración del modelo — TODO debe venir del .env (sin defaults ocultos)
-    ai_api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
-    ai_model = os.getenv("AI_MODEL")
-    ai_base_url = os.getenv("AI_MODEL_BASE_URL")
-    ai_temperature = os.getenv("AI_TEMPERATURE")
+    # Obtener tablas de TODOS los schemas (SQL Server con multiple schemas como AdventureWorks)
+    db_inspector = inspect(engine)
+    all_schemas = [s for s in db_inspector.get_schema_names()
+                   if s.lower() not in ('information_schema', 'sys', 'guest',
+                                        'db_owner', 'db_accessadmin', 'db_securityadmin',
+                                        'db_ddladmin', 'db_backupoperator', 'db_datareader',
+                                        'db_datawriter', 'db_denydatareader', 'db_denydatawriter')]
 
-    missing = []
-    if not ai_api_key:
-        missing.append("DEEPSEEK_API_KEY (u OPENAI_API_KEY como fallback)")
-    if not ai_model:
-        missing.append("AI_MODEL")
-    if not ai_base_url:
-        missing.append("AI_MODEL_BASE_URL")
-    if not ai_temperature:
-        missing.append("AI_TEMPERATURE")
-    if missing:
+    all_tables = []
+    custom_table_info = {}
+    for schema in all_schemas:
+        for table_name in db_inspector.get_table_names(schema=schema):
+            all_tables.append(table_name)
+            qualified = f"{schema}.{table_name}" if schema != 'dbo' else table_name
+            cols = db_inspector.get_columns(table_name, schema=schema)
+            col_lines = []
+            for c in cols:
+                nullable = " NOT NULL" if not c.get('nullable', True) else ""
+                col_lines.append(f"  [{c['name']}] {c['type']}{nullable}")
+            custom_table_info[table_name] = f"CREATE TABLE [{qualified}] (\n" + "\n".join(col_lines) + "\n)"
+
+    db = SQLDatabase(engine, custom_table_info=custom_table_info)
+
+    # SQLDatabase solo refleja el schema default (dbo) internamente.
+    # AdventureWorks usa múltiples schemas (Person, Production, Sales, etc.)
+    # — sobrescribimos los sets internos para que cubran todas las tablas.
+    db._all_tables = set(all_tables)
+    db._usable_tables = set(all_tables)
+    db._custom_table_info = custom_table_info
+
+    # Reemplazar get_table_info para que use custom_table_info directamente
+    # (sin depender del reflection de metadata que solo ve schema dbo)
+    _custom_info = custom_table_info
+    _all_names = list(all_tables)
+    def _patched_get_table_info(self, table_names=None, get_col_comments=False):
+        names = table_names if table_names else _all_names
+        result = []
+        for name in names:
+            if name in _custom_info:
+                result.append(_custom_info[name])
+            else:
+                result.append(f"-- {name}: no disponible")
+        return "\n\n".join(result)
+    db.get_table_info = _patched_get_table_info.__get__(db, type(db))
+
+    # Inicializar LLM desde variables de entorno (mismo patrón que assistant.py)
+    env_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+    env_model = os.getenv("AI_MODEL")
+    env_base_url = os.getenv("AI_MODEL_BASE_URL")
+    env_temp = os.getenv("AI_TEMPERATURE")
+
+    if not all([env_key, env_model, env_base_url, env_temp]):
         raise ValueError(
-            "Faltan variables en el archivo .env:\n  - " + "\n  - ".join(missing) +
-            "\nCopia .env.example a .env y completa los valores."
+            "Faltan variables de entorno: DEEPSEEK_API_KEY (u OPENAI_API_KEY), "
+            "AI_MODEL, AI_MODEL_BASE_URL, AI_TEMPERATURE"
         )
-    ai_temperature = float(ai_temperature)
 
     llm = ChatOpenAI(
-        model=ai_model,
-        temperature=ai_temperature,
-        openai_api_key=ai_api_key,
-        openai_api_base=ai_base_url
+        model=env_model,
+        temperature=float(env_temp),
+        openai_api_key=env_key,
+        openai_api_base=env_base_url,
     )
-    chain = create_sql_query_chain(llm=llm, db=db)
+
+    chain = create_sql_query_chain(llm, db, prompt=CUSTOM_PROMPT)
+
     return chain, engine
 
-PROMPT_TEMPLATES = {
-    "SQL Server": """
-Dada una pregunta del usuario:
-1. Crea SOLAMENTE una consulta de SQL Server válida. NO uses markdown, NO uses ```sql.
-2. Asegúrate de escapar los nombres de tablas y columnas con corchetes [] si son palabras reservadas o contienen espacios (ej. [Mi Tabla], [Mi Columna]).
-3. La consulta debe ser SQL puro, sin comentarios ni explicaciones adicionales.
-4. Revisa los resultados.
-5. Devuelve el dato.
-6. Si tienes que hacer alguna aclaración o devolver cualquier texto que sea, hazlo después de la consulta.
+CUSTOM_PROMPT = PromptTemplate(
+    input_variables=["input", "table_info"],
+    partial_variables={"top_k": "5"},
+    template="""Convierte esta pregunta en una consulta SQL.
 
-Pregunta: {question}
-""",
-    "PostgreSQL": """
-Dada una pregunta del usuario:
-1. Crea SOLAMENTE una consulta de PostgreSQL válida. NO uses markdown, NO uses ```sql.
-2. Asegúrate de escapar los nombres de tablas y columnas con comillas dobles "" si son palabras reservadas o contienen espacios (ej. "Mi Tabla", "Mi Columna").
-3. La consulta debe ser SQL puro, sin comentarios ni explicaciones adicionales.
-4. Revisa los resultados.
-5. Devuelve el dato.
-6. Si tienes que hacer alguna aclaración o devolver cualquier texto que sea, hazlo después de la consulta.
+{table_info}
 
-Pregunta: {question}
-""",
-    "MySQL": """
-Dada una pregunta del usuario:
-1. Crea SOLAMENTE una consulta de MySQL válida. NO uses markdown, NO uses ```sql.
-2. Asegúrate de escapar los nombres de tablas y columnas con acentos graves `` si son palabras reservadas o contienen espacios (ej. `Mi Tabla`, `Mi Columna`).
-3. La consulta debe ser SQL puro, sin comentarios ni explicaciones adicionales.
-4. Revisa los resultados.
-5. Devuelve el dato.
-6. Si tienes que hacer alguna aclaración o devolver cualquier texto que sea, hazlo después de la consulta.
-
-Pregunta: {question}
-""",
-    "SQLite": """
-Dada una pregunta del usuario:
-1. Crea SOLAMENTE una consulta de SQLite válida. NO uses markdown, NO uses ```sql.
-2. La consulta debe ser SQL puro, sin comentarios ni explicaciones adicionales.
-3. Revisa los resultados.
-4. Devuelve el dato.
-5. Si tienes que hacer alguna aclaración o devolver cualquier texto que sea, hazlo después de la consulta.
-
-Pregunta: {question}
-"""
-}
+Pregunta: {input}"""
+)
 
 def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> tuple:
     """
@@ -200,12 +202,20 @@ def consulta(chain, engine, input_usuario: str, db_type: str = "SQL Server") -> 
         - resultado: DataFrame si es SELECT, string con error/texto en otros casos
         - sql_generado: string con el SQL generado por el LLM (para mostrar en UI)
     """
-    formato = PROMPT_TEMPLATES.get(db_type, PROMPT_TEMPLATES["SQL Server"])
-    consulta_formateada = formato.format(question=input_usuario)
-
     # create_sql_query_chain retorna el SQL generado como string
-    sql_query = chain.invoke({"input": consulta_formateada})
+    # El prompt ya lo maneja el chain con CUSTOM_PROMPT (en español)
+    sql_query = chain.invoke({"question": input_usuario})
+
     cleaned_sql = clean_sql_query(sql_query)
+
+    # Detectar respuesta JSON estructurada (LLM responde con datos en vez de SQL)
+    try:
+        data = json.loads(cleaned_sql)
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data)
+            return df, cleaned_sql
+    except (json.JSONDecodeError, ValueError):
+        pass
 
     if "select" in cleaned_sql.strip().lower():
         try:

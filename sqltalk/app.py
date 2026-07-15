@@ -12,6 +12,7 @@ st.set_page_config(
 import os
 import pandas as pd
 import plotly.express as px
+from datetime import datetime
 from typing import Dict, List, Any, Optional
 from sqltalk.sql_agent import get_db_chain, consulta
 from sqltalk.viz import auto_visualize, show_data_summary, parse_text_to_dataframe
@@ -21,21 +22,24 @@ from dotenv import load_dotenv
 
 # Configuración inicial
 load_dotenv()
-if os.getenv("OPENAI_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 # Session state
 for key, default in [('query_results', None), ('query_dataframe', None), ('last_query', ""),
                      ('last_sql', ""), ('ai_assistant', None), ('ai_insights', None),
                      ('follow_up_queries', []), ('engine', None),
-                     ('conversation_history', []), ('show_kpi', True),
+                     ('conversation_history', []), ('favorites', []), ('show_kpi', True),
                      ('refined_query', False), ('is_refinement', False)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
 # Inicializar asistente IA
-if st.session_state.ai_assistant is None:
-    st.session_state.ai_assistant = IntelligentAssistant()
+try:
+    if st.session_state.ai_assistant is None:
+        st.session_state.ai_assistant = IntelligentAssistant()
+except ValueError as e:
+    st.error(f"⚠️ {e}")
+    st.info("Copiá `.env.example` a `.env` y completá los valores requeridos.")
+    st.stop()
 
 # =====================================================
 # SIDEBAR — Conexión y configuración
@@ -141,7 +145,20 @@ with st.sidebar:
     else:
         st.caption("Sin consultas aún")
 
-    st.markdown("---")
+    # Favoritos
+    if st.session_state.favorites:
+        st.markdown("##### :material/star: Favoritas")
+        for i, fav in enumerate(st.session_state.favorites):
+            label = fav["query"][:45] + ("…" if len(fav["query"]) > 45 else "")
+            st.caption(fav["date"])
+            if st.button(label, key=f"fav_{i}", use_container_width=True):
+                st.session_state.last_query = fav["query"]
+                st.session_state.last_sql = fav["sql"]
+                st.session_state.query_results = None
+                st.session_state.query_dataframe = None
+                st.session_state.ai_insights = None
+                st.rerun()
+        st.markdown("---")
     st.caption("SQLTalk-AI v1.0 — Edwin Quintero Alzate")
 
 # =====================================================
@@ -269,7 +286,6 @@ if consultar_btn and input_usuario:
 # RESULTADOS
 # =====================================================
 if st.session_state.query_results is not None:
-    st.space("small")
     st.markdown(f"##### :material/search_insights: {st.session_state.last_query}")
 
     # Indicador de refinamiento contextual
@@ -337,6 +353,18 @@ if st.session_state.query_results is not None:
                 )
             except Exception:
                 st.caption("Excel no disponible (instala openpyxl: pip install openpyxl)")
+
+    # Botón guardar como favorita
+    already_saved = st.session_state.last_sql in [f["sql"] for f in st.session_state.favorites]
+    if not already_saved and st.session_state.last_sql:
+        if st.button(":material/star: Guardar consulta", key="save_fav", use_container_width=True):
+            st.session_state.favorites.append({
+                "query": st.session_state.last_query,
+                "sql": st.session_state.last_sql,
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            st.success("Consulta guardada en favoritos")
+            st.rerun()
     else:
         st.markdown(st.session_state.query_results)
         if st.session_state.query_dataframe is not None:
@@ -348,7 +376,6 @@ if (st.session_state.query_dataframe is not None and
     len(st.session_state.query_dataframe) > 0 and mostrar_graficos):
 
     df = st.session_state.query_dataframe
-    st.space("small")
 
     # Estadísticas (colapsadas)
     with st.expander(":material/analytics: Resumen Estadístico", expanded=False):
@@ -414,7 +441,6 @@ if (st.session_state.query_dataframe is not None and
 
 # Sección del Asistente Inteligente
 if st.session_state.ai_insights is not None and st.session_state.ai_insights.strip():
-    st.space("small")
 
     # Header del asistente IA
     st.markdown("""

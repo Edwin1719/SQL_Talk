@@ -82,11 +82,7 @@ setup(
             "myst-parser>=3.0.0",
         ]
     },
-    entry_points={
-        "console_scripts": [
-            "sqltalk-cli=scripts.cli:main",
-        ],
-    },
+    include_package_data=True,
     project_urls={
         "Bug Reports": "https://github.com/Edwin1719/SQL_Talk/issues",
         "Source": "https://github.com/Edwin1719/SQL_Talk",

@@ -20,8 +20,6 @@ numpy==1.26.0
 
 # Visualization
 plotly==5.17.0
-matplotlib==3.8.2
-seaborn==0.13.0
 
 # UI Enhancements
 st-social-media-links==0.1.0

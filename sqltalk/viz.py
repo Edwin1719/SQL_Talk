@@ -6,26 +6,8 @@ import numpy as np
 import re
 from typing import List, Optional, Tuple, Union, Any
 
-# Constantes
-SKIP_PATTERNS = [
-    'las ventas', 'son las', 'total sales', 'by sales channel', 'for the years', 'siguientes',
-    'por producto son las siguientes', 'por canal son las siguientes', 'por categoría son las siguientes',
-    'por región son las siguientes', 'por país son las siguientes', 'total sales for the year',
-    'by category are as follows', 'by product are as follows', 'are as follows'
-]
+import json
 
-CATEGORY_PATTERNS = [
-    'las ventas totales para', 'son las siguientes', 'por producto son', 'por canal son',
-    'por categoría son', 'por región son', 'total sales for the year', 'by category are as follows',
-    'by product are as follows', 'are as follows'
-]
-
-REGEX_PATTERNS = [
-    r'([^con\n]+?)\s+con\s+ventas\s+totales\s+de\s+\$?([\d,]+(?:\.\d+)?)',
-    r'([^-\n]+)\s*-\s*\$?([\d,]+(?:\.\d+)?)',
-    r'([^:\n$]+):\s*\$?([\d,]+(?:\.\d+)?)',
-    r'^([^:$\n]+?):\s*\$?([\d,]+(?:\.\d+)?)$'
-]
 
 def get_column_types(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     return (
@@ -84,97 +66,41 @@ def auto_visualize(df: pd.DataFrame) -> Optional[go.Figure]:
     chart_type = detect_chart_type(df)
     return create_chart(df, chart_type) if chart_type else None
 
-def detect_column_names(query_text: str, text_response: str) -> Tuple[str, str]:
-    query_lower = query_text.lower()
-    category_mappings = {
-        'pais': 'País', 'país': 'País', 'canal': 'Canal de Venta', 'producto': 'Producto',
-        'categoría': 'Categoría', 'categoria': 'Categoría', 'región': 'Región', 'region': 'Región',
-        'estado': 'Estado', 'ciudad': 'Ciudad', 'cliente': 'Cliente', 'vendedor': 'Vendedor',
-        'marca': 'Marca', 'tienda': 'Tienda', 'sucursal': 'Sucursal'
-    }
-    category_name = 'Categoría'
-    for key, name in category_mappings.items():
-        if key in query_lower:
-            category_name = name
-            break
-    value_name = 'Ventas'
-    if 'cantidad' in query_lower:
-        value_name = 'Cantidad'
-    elif 'precio' in query_lower:
-        value_name = 'Precio'
-    return category_name, value_name
-
 def parse_text_to_dataframe(text_response: Union[str, Any], query_text: str = "") -> Optional[pd.DataFrame]:
+    """Convierte respuesta del LLM a DataFrame. Intenta JSON primero, regex como fallback."""
     if not isinstance(text_response, str):
         return None
-    if 'para el canal "' in text_response.lower() and 'en 20' in text_response:
-        return parse_multi_year_data(text_response, query_text)
 
-    matches = []
-    for pattern in REGEX_PATTERNS:
-        matches = re.findall(pattern, text_response, re.MULTILINE)
-        if matches:
-            break
+    # Ruta principal: JSON estructurado
+    try:
+        data = json.loads(text_response)
+        if isinstance(data, list) and len(data) > 0:
+            return pd.DataFrame(data)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
 
-    if not matches:
-        for line in text_response.split('\n'):
-            line = line.strip()
-            if not line or any(skip in line.lower() for skip in SKIP_PATTERNS):
-                continue
-            for pattern in REGEX_PATTERNS:
-                line_matches = re.findall(pattern, line)
-                if line_matches:
-                    matches.extend(line_matches)
+    # Fallback: regex para respuestas en texto libre (compatibilidad hacia atrás)
+    try:
+        lines = [l.strip() for l in text_response.split('\n') if l.strip()]
+        rows = []
+        for line in lines:
+            parts = re.split(r'\s{2,}|\t', line)
+            if len(parts) >= 2:
+                row = []
+                for p in parts:
+                    p = p.strip().rstrip(',').replace('$', '').replace(',', '')
+                    try:
+                        row.append(float(p))
+                    except ValueError:
+                        row.append(p)
+                rows.append(row)
+        if len(rows) >= 2:
+            return pd.DataFrame(rows[1:], columns=rows[0])
+    except Exception:
+        pass
 
-    if matches:
-        categories, values = [], []
-        for category, value in matches:
-            clean_category = category.strip().replace('\n', '').replace('  ', ' ')
-            if not clean_category or any(skip in clean_category.lower() for skip in CATEGORY_PATTERNS):
-                continue
-            try:
-                numeric_value = float(value.replace(',', '').replace('$', '').strip())
-                if (numeric_value <= 1 and
-                    any(skip in clean_category.lower() for skip in ['las ventas totales', 'are as follows'])):
-                    continue
-                categories.append(clean_category)
-                values.append(numeric_value)
-            except ValueError:
-                continue
-        if categories and values and len(categories) == len(values):
-            category_name, value_name = detect_column_names(query_text, text_response)
-            return pd.DataFrame({category_name: categories, value_name: values})
     return None
 
-def parse_multi_year_data(text_response: str, query_text: str) -> Optional[pd.DataFrame]:
-    pattern = r'Para el canal\s+"([^"]+)"\s+en\s+(\d{4}),\s+las ventas[^$]*\$?([\d,]+(?:\.\d+)?)'
-    matches = re.findall(pattern, text_response, re.IGNORECASE)
-    if not matches:
-        return None
-    data_by_channel = {}
-    for channel, year, value in matches:
-        clean_channel = channel.strip()
-        clean_value = float(value.replace(',', '').replace('$', ''))
-        if clean_channel not in data_by_channel:
-            data_by_channel[clean_channel] = {}
-        data_by_channel[clean_channel][year] = clean_value
-    df_data = []
-    for channel, years_data in data_by_channel.items():
-        df_data.append({
-            'Canal de Venta': channel,
-            'Ventas_2019': years_data.get('2019', 0),
-            'Ventas_2020': years_data.get('2020', 0)
-        })
-    df = pd.DataFrame(df_data)
-    if len(df) > 0:
-        mask = (df['Ventas_2019'] > 0) & (df['Ventas_2020'] > 0)
-        df.loc[mask, 'Crecimiento_%'] = (
-            (df.loc[mask, 'Ventas_2020'] - df.loc[mask, 'Ventas_2019']) /
-            df.loc[mask, 'Ventas_2019'] * 100
-        ).round(2)
-        df['Diferencia'] = df['Ventas_2020'] - df['Ventas_2019']
-        df['Crecimiento_%'] = df['Crecimiento_%'].fillna(0)
-    return df
 
 def show_data_summary(df: pd.DataFrame) -> None:
     if not isinstance(df, pd.DataFrame) or df.empty:

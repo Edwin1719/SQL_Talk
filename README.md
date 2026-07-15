@@ -64,8 +64,6 @@ source venv/bin/activate # Linux/Mac
 pip install -r requirements.txt
 ```
 
-> **Alternativa:** `pip install -e .` instala el paquete y deja disponible el comando `sqltalk-cli` (ver más abajo).
-
 ---
 
 ## Configuración
@@ -95,25 +93,15 @@ El resto de variables son opcionales (conexión por defecto a SQL Server, loggin
 streamlit run sqltalk/app.py
 ```
 
-### CLI (consulta hardcodeada de ejemplo)
-
-```bash
-python -m scripts.cli
-# o si instalaste con pip install -e .
-sqltalk-cli
-```
-
 ```
 sqltalk/
 ├── app.py              # Interfaz Streamlit (UI, formularios, resultados, gráficos, KPIs)
 ├── sql_agent.py        # Conexión a BD, generación y limpieza de SQL vía LangChain
 ├── assistant.py        # Clase IntelligentAssistant: insights, tendencias, anomalías, schema Q&A
 ├── viz.py              # Visualización automática y personalizada con Plotly
-├── pbip_builder.py     # Generación de proyectos Power BI (formato PBIP) 🆕
-scripts/
-├── cli.py              # Entry point de consola (consulta fija)
+├── pbip_builder.py     # Generación de proyectos Power BI (formato PBIP)
 tests/
-├── test_pbip_builder.py  # Tests para generación PBIP 🆕
+├── test_pbip_builder.py  # Tests para generación PBIP
 ├── test_viz.py
 ├── test_assistant.py
 ├── test_sql_agent.py
@@ -147,7 +135,7 @@ tests/
 | Consultas sugeridas | ✅ | Basadas en dominio detectado (ventas, productos, clientes) |
 | Historial de sesión | ✅ | Últimas 10 consultas con resumen |
 | Exportar CSV / Excel | ✅ | Botones de descarga directa |
-| Test suite | ✅ | 34 tests (pytest) — pbip_builder, viz, assistant, sql_agent |
+| Test suite | ✅ | 44 tests (pytest) — pbip_builder, assistant, sql_agent |
 | Validación de SQL generado | ❌ | Pendiente — no rechaza DROP/DELETE/TRUNCATE |
 
 ## Dependencias principales
@@ -156,7 +144,7 @@ tests/
 |---|---|---|
 | `streamlit` | 1.32 | Interfaz de usuario |
 | `langchain` | 0.3.0 | Orquestación LLM |
-| `langchain-experimental` | 0.0.6 | `SQLDatabaseChain` (deprecado — pendiente migrar a `langchain-sql`) |
+| `langchain-community` | 0.3.27 | Utilidades: `SQLDatabase`, conectores |
 | `langchain-openai` | 0.1.25 | Cliente ChatOpenAI (compatible DeepSeek) |
 | `sqlalchemy` | 2.0.35 | Conexión a bases de datos |
 | `plotly` | 5.17.0 | Visualización interactiva |
@@ -173,7 +161,6 @@ MIT. Ver [LICENSE](LICENSE).
 
 ## Notas de desarrollo
 
-- El proyecto migró de OpenAI GPT a DeepSeek V4 Flash como modelo por defecto (2026-07-02).
-- Las variables de entorno `AI_MODEL`, `AI_MODEL_BASE_URL` y `AI_TEMPERATURE` controlan el modelo sin tocar código.
-- `langchain-experimental` está deprecado; la próxima refactorización debería migrar a `langchain-sql` / `create_sql_query_chain`.
-- El README anterior contenía benchmarks y roadmaps expirados. Este README describe solo lo que el código realmente hace. Si algo falta, está en la lista de funcionalidades pendientes, no en una promesa futura.
+- El proyecto usa DeepSeek V4 Flash como modelo por defecto; configurable vía `AI_MODEL`, `AI_MODEL_BASE_URL` y `AI_TEMPERATURE` en `.env`.
+- `langchain_openai.ChatOpenAI` reemplazó a `langchain_community.chat_models.ChatOpenAI` (deprecado en LangChain 0.3).
+- Soporte multi-schema (AdventureWorks y bases con schemas no-dbo): `SQLDatabase` se parchea post-construcción para incluir tablas de todos los schemas.

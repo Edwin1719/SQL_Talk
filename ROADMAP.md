@@ -37,6 +37,38 @@
 | Explorador de esquema | ✅ | `sqlalchemy.inspect()` en sidebar |
 | Test suite (34 tests) | ✅ | pytest sobre pbip_builder, viz, assistant, sql_agent |
 | UI profesional con sidebar | ✅ | Material icons, gradiente, footer SVGs |
+
+### 🎯 1.5 — Guardián SQL (solo SELECT)
+
+SQLTalk valida que todo SQL generado sea exclusivamente una consulta `SELECT`,
+rechazando `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `INSERT` y cualquier
+statement destructivo antes de ejecutarlo contra la BD.
+
+- **Esfuerzo:** Bajo (~30 líneas en `sql_agent.py`: parser + test)
+- **Valor:** Crítico — previene pérdida o modificación accidental de datos productivos
+- **Dependencias:** Ninguna
+- **Configuración:** Variable `SQL_READONLY_MODE=true` en `.env` (opcional, por defecto activo)
+
+### ✅ 1.6 — Housekeeping: dependencias muertas
+
+Eliminar paquetes en `requirements.txt` que no se importan en ningún módulo
+del proyecto. `matplotlib` y `seaborn` están presentes pero todo el renderizado
+usa Plotly.
+
+- **Esfuerzo:** Muy bajo (2 líneas en `requirements.txt`) — ✅ Completado
+- **Valor:** Medio — reduce ~15 MB de instalación innecesaria
+- **Dependencias:** Ninguna
+- **Riesgo:** Bajo — verificar que ningún import los referencie antes de eliminar
+
+### 🎯 1.7 — Tests de integración del pipeline completo
+
+Agregar tests que validen el flujo NL → SQL → DataFrame usando una BD
+SQLite en memoria y un mock del LLM que devuelva SQL conocido. Hoy hay
+34 tests unitarios pero ninguno para `consulta()` ni `get_db_chain()`.
+
+- **Esfuerzo:** Bajo (~1h: fixture con `sqlite:///:memory:` + mock de `ChatOpenAI`)
+- **Valor:** Alto — detecta regresiones en el core del proyecto antes de producción
+- **Dependencias:** `pytest`, `unittest.mock`
 ---
 
 ## Fase 2 — Integración con Power BI (próximo)
@@ -156,11 +188,11 @@ re-ejecutarlas, compartirlas o usarlas como base para nuevas preguntas.
 - **Valor:** Medio — evita re-escribir consultas frecuentes
 - **Dependencias:** Ninguna
 
-### 💡 3.4 — Query favoritas / guardadas
+### ✅ 3.4 — Query favoritas / guardadas
 
 El usuario puede marcar consultas como favoritas y ejecutarlas con un clic.
 
-- **Esfuerzo:** Bajo (~15 líneas)
+- **Esfuerzo:** Bajo (~15 líneas) — ✅ Completado
 - **Valor:** Medio — las 5 consultas que el gerente repite semanalmente
 - **Dependencias:** Historial persistente (3.3)
 
@@ -216,6 +248,15 @@ lidera con un 32% del total."
 - **Valor:** Alto — el gerente obtiene el resumen sin leer tablas
 - **Dependencias:** LLM con contexto de resultados numéricos
 
+### ✅ 4.5 — Parsing robusto de resultados del LLM
+
+Parseo de respuestas del LLM migrado de regex frágil a `json.loads()` sobre
+JSON estructurado. Los prompts de los 4 motores SQL instruyen al LLM a devolver
+un array JSON de objetos cuando no puede generar un SELECT. `parse_multi_year_data()`
+eliminada. Regex mantenido como fallback de compatibilidad.
+
+- **Esfuerzo:** Bajo — ✅ Completado
+
 ---
 
 ## Fase 5 — Experiencia de usuario (futuro)
@@ -238,16 +279,33 @@ entre turnos.
 - **Valor:** Alto — experiencia más natural e intuitiva
 - **Dependencias:** Streamlit 1.32+
 
+### 💡 5.3 — Refactor de UI a componentes
+
+`app.py` tiene ~550 líneas mezclando UI, lógica de negocio y manejo de
+estado en un solo archivo. Extraer la interfaz en componentes separados
+para mejorar mantenibilidad y preparar el terreno para el chat conversacional (5.2).
+
+**Componentes propuestos:**
+- `SidebarConnection` — formulario de conexión a BD (hoy ~100 líneas en sidebar)
+- `ResultsPanel` — tabla de resultados + exportación CSV/Excel
+- `InsightsPanel` — insights IA + KPIs + consultas sugeridas
+- `PbipGenerator` — generador de modelos Power BI
+
+- **Esfuerzo:** Medio (~2h: extraer lógica a archivos separados + pruebas manuales)
+- **Valor:** Alto — el código se vuelve testeable, navegable y preparado para 5.2
+- **Dependencias:** Ninguna
+- **Nota:** Hacerlo ANTES de 5.2 para no refactorizar dos veces
+
 ---
 
 ## Resumen visual del roadmap
 
 ```
-FASE 1 ─── Consolidación ───────────────────────────────────────────── ✅ hoy
+FASE 1 ─── Consolidación ─── Guardián SQL → Housekeeping → Tests integración ✅ hoy + 🎯
 FASE 2 ─── Power BI ─── BD puente → DAX → Modelo PBIP ⭐ → MCP en vivo → Dashboard
 FASE 3 ─── Automatización ─── Reportes → Alertas → Historial → Favoritos
-FASE 4 ─── Análisis avanzado ─── JOIN auto → Multi-período → Debug SQL → Narración
-FASE 5 ─── UX ─── .exe → Chat conversacional
+FASE 4 ─── Análisis avanzado ─── JOIN auto → Multi-período → Debug SQL → Narración → Parsing robusto
+FASE 5 ─── UX ─── .exe → Chat conversacional → Refactor UI
 ```
 
 ---

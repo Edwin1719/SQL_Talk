@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 import json
 from dotenv import load_dotenv
